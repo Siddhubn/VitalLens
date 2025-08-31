@@ -1,0 +1,8 @@
+services:
+  - type: web
+    name: vitallens
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python backend/app.py
+    plan: free
+    autoDeploy: true

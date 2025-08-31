@@ -1,0 +1,603 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VitalLens - Health Monitoring</title>
+    <link rel="icon" href="VitalLens_logo.png" type="image/png">
+    <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <style>
+        /* ------------------- GLOBAL STYLES ------------------- */
+        :root {
+            --dark-bg-color: #0f172a;
+            --deep-purple: #1e1b4b;
+            --indigo-bg: #312e81;
+            --text-light: #e2e8f0;
+            --text-muted: #94a3b8;
+            --accent-purple: #a78bfa;
+            --dark-card: rgba(255, 255, 255, 0.08);
+            --dark-border: rgba(255, 255, 255, 0.15);
+            --gradient-btn: linear-gradient(135deg, #7c3aed, #8b5cf6);
+            --gradient-btn-hover: linear-gradient(135deg, #8b5cf6, #a78bfa);
+            --card-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
+            --video-border: 2px solid #4c1d95;
+        }
+
+        html {
+            scroll-behavior: smooth;
+        }
+
+        body {
+            font-family: 'Poppins', sans-serif;
+            background: linear-gradient(135deg, var(--dark-bg-color), var(--deep-purple), var(--indigo-bg));
+            color: var(--text-light);
+            margin: 0;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            line-height: 1.6;
+        }
+
+        h2 {
+            margin: 0 0 1rem 0;
+            font-weight: 600;
+            color: var(--accent-purple);
+            text-align: center;
+        }
+
+        a {
+            color: var(--accent-purple);
+            text-decoration: none;
+            transition: color 0.3s ease;
+        }
+
+        a:hover {
+            color: #c4b5fd;
+        }
+
+        /* ------------------- LAYOUT ------------------- */
+        .container {
+            width: 90%;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        header,
+        main,
+        footer {
+            padding: 1.5rem 0;
+        }
+
+        main {
+            flex-grow: 1;
+            display: flex;
+            align-items: center;
+            padding-top: 2rem;
+            padding-bottom: 2rem;
+        }
+
+        .grid {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 2rem;
+            width: 100%;
+        }
+
+        @media (min-width: 768px) {
+            .grid {
+                grid-template-columns: 1fr 1fr;
+            }
+        }
+
+        /* ------------------- COMPONENTS ------------------- */
+        /* Header */
+        header {
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(10px);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.6);
+            position: sticky;
+            top: 0;
+            z-index: 50;
+        }
+
+        header .container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 1rem;
+            padding: 0.5rem 1rem;
+        }
+
+        .logo {
+            height: 40px;
+            width: auto;
+        }
+
+        header span {
+            font-size: 1.8rem;
+            font-weight: bold;
+            letter-spacing: 1px;
+            color: var(--accent-purple);
+        }
+
+        /* Card */
+        .card {
+            background: var(--dark-card);
+            border: 1px solid var(--dark-border);
+            border-radius: 1.25rem;
+            padding: 2rem 1.5rem;
+            box-shadow: var(--card-shadow);
+            backdrop-filter: blur(12px);
+            transition: transform 0.3s ease, box-shadow 0.3s ease;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 12px 36px rgba(0, 0, 0, 0.7);
+        }
+
+        .card-title-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            position: relative;
+            margin-bottom: 1rem;
+        }
+
+        .card-title-container h2 {
+            flex-grow: 1;
+            margin: 0;
+            margin-bottom: 1rem;
+        }
+
+        /* Camera */
+        .video-container {
+            position: relative;
+            background: var(--dark-bg-color);
+            border: var(--video-border);
+            border-radius: 1rem;
+            aspect-ratio: 16 / 9;
+            overflow: hidden;
+            box-shadow: inset 0 0 12px rgba(167, 139, 250, 0.3);
+        }
+
+        video {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        #face-detection-status {
+            position: absolute;
+            top: 0.75rem;
+            right: 0.75rem;
+            background: linear-gradient(135deg, #ef4444, #dc2626);
+            color: white;
+            font-size: 0.75rem;
+            font-weight: 600;
+            padding: 0.4rem 0.9rem;
+            border-radius: 9999px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+            white-space: nowrap;
+        }
+
+        /* Button */
+        button {
+            width: 100%;
+            background: var(--gradient-btn);
+            color: white;
+            font-weight: bold;
+            padding: 0.9rem;
+            border: none;
+            border-radius: 0.75rem;
+            margin-top: 1.5rem;
+            cursor: pointer;
+            box-shadow: 0 4px 15px rgba(124, 58, 237, 0.4);
+            transition: all 0.3s ease;
+            font-size: 1rem;
+            display: inline-flex;
+            justify-content: center;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        button:hover {
+            background: var(--gradient-btn-hover);
+            box-shadow: 0 8px 24px rgba(139, 92, 246, 0.6);
+            transform: translateY(-2px);
+        }
+
+        button:disabled {
+            background: #475569;
+            color: #94a3b8;
+            cursor: not-allowed;
+            box-shadow: none;
+            transform: none;
+        }
+
+        #importance-btn {
+            background: rgba(167, 139, 250, 0.2);
+            color: var(--accent-purple);
+            padding: 0.5rem 1rem;
+            font-size: 0.9rem;
+            font-weight: 500;
+            border: 1px solid rgba(167, 139, 250, 0.4);
+            border-radius: 20px;
+            width: auto;
+            margin-top: 0;
+        }
+
+        #importance-btn:hover {
+            background: rgba(167, 139, 250, 0.4);
+        }
+
+        @media (max-width: 767px) {
+            .card-title-container {
+                flex-direction: column;
+                align-items: center;
+            }
+
+            .card-title-container h2 {
+                margin-bottom: 0.5rem;
+            }
+
+            #importance-btn {
+                position: static;
+                transform: none;
+                width: fit-content;
+                align-self: center;
+                padding: 0.4rem 0.9rem;
+                font-size: 0.8rem;
+            }
+        }
+
+        @media (min-width: 768px) {
+            .card-title-container {
+                flex-direction: row;
+                justify-content: center;
+            }
+
+            .card-title-container h2 {
+                margin-bottom: 0;
+            }
+
+            #importance-btn {
+                position: absolute;
+                right: 0;
+                top: 50%;
+                transform: translateY(-50%);
+                padding: 0.25rem 0.75rem;
+                font-size: 0.75rem;
+            }
+
+            .logo {
+                height: 50px;
+            }
+        }
+
+        /* Results */
+        #results-placeholder {
+            color: var(--text-muted);
+            text-align: center;
+            padding: 2rem 0;
+        }
+
+        .loader {
+            border: 4px solid rgba(255, 255, 255, 0.2);
+            border-top: 4px solid var(--accent-purple);
+            border-radius: 50%;
+            width: 52px;
+            height: 52px;
+            margin-bottom: 1rem;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        #processing-loader {
+            display: none;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .result-box {
+            display: flex;
+            align-items: center;
+            gap: 0.8rem;
+            background: rgba(124, 58, 237, 0.15);
+            border: 1px solid #8b5cf6;
+            color: #e9d5ff;
+            padding: 1rem;
+            border-radius: 0.85rem;
+            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
+            opacity: 0;
+            transform: translateY(10px);
+            animation: fadeIn 0.6s forwards;
+            font-size: 1rem;
+        }
+
+        .result-box i {
+            font-size: 1.3rem;
+            color: #c084fc;
+        }
+
+        .result-box p {
+            margin: 0;
+        }
+
+        @keyframes fadeIn {
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* Modal */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            z-index: 100;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(5px);
+            justify-content: center;
+            align-items: center;
+            padding: 0rem;
+        }
+
+        .modal-content {
+            background-color: #1e293b;
+            color: var(--text-light);
+            padding: 2rem;
+            border: 1px solid #4f46e5;
+            border-radius: 1rem;
+            width: 100%;
+            max-width: 650px;
+            max-height: 90vh;
+            overflow-y: auto;
+            position: relative;
+        }
+
+        /* NEW CSS FOR MOBILE MODAL PADDING AND MARGIN */
+        @media (max-width: 767px) {
+            .modal-content {
+                padding: 1.8rem; /* Reduced inner padding */
+                margin: 10px 1rem; /* Added margin on the sides */
+            }
+        }
+        /* END NEW CSS */
+
+        .modal-content h3 {
+            color: var(--accent-purple);
+            margin-top: 1.5rem;
+            margin-bottom: 0.5rem;
+            font-size: 1.25rem;
+        }
+
+        .modal-content ul {
+            margin-top: 0.5rem;
+            padding-left: 1.5rem;
+        }
+
+        .modal-content hr {
+            border: none;
+            height: 1px;
+            background-color: rgba(255, 255, 255, 0.1);
+            margin: 2rem 0;
+        }
+
+        .close-btn {
+            color: #aaa;
+            position: absolute;
+            top: 10px;
+            right: 20px;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+
+        .close-btn:hover,
+        .close-btn:focus {
+            color: #fff;
+        }
+
+        /* Footer */
+        footer {
+            background: rgba(15, 23, 42, 0.8);
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+            text-align: center;
+            padding: 1rem 0;
+        }
+
+        footer p {
+            margin: 0;
+            font-size: 0.9rem;
+            color: var(--text-muted);
+        }
+
+        /* ------------------- PDF EXPORT STYLES ------------------- */
+        .pdf-export-mode h2,
+        .pdf-export-mode h3 {
+            color: #000000 !important;
+        }
+
+        .pdf-export-mode p,
+        .pdf-export-mode ul,
+        .pdf-export-mode li,
+        .pdf-export-mode b {
+            color: #333333 !important;
+        }
+
+        .pdf-export-mode .result-box {
+            background: #ffffff !important;
+            border: 1px solid #e5e7eb !important;
+            animation: none !important;
+            opacity: 1 !important;
+            transform: none !important;
+        }
+
+        .pdf-export-mode .result-box i {
+            color: #6d28d9 !important;
+        }
+    </style>
+</head>
+<body>
+    <div class="page-wrapper">
+        <header>
+            <div class="container">
+                <img src="VitalLens_logo.png" alt="VitalLens Logo" class="logo">
+                <span>VitalLens</span>
+            </div>
+        </header>
+
+        <main>
+            <div class="container">
+                <div class="grid">
+                    <div class="card">
+                        <h2 style="margin-bottom: 1.5rem;">Health Monitor</h2>
+                        <div class="video-container">
+                            <video id="video" playsinline autoplay muted></video>
+                            <div id="face-detection-status">No Face Detected</div>
+                        </div>
+                        <button id="start-monitoring-btn"><i class="fas fa-play"></i> Start Monitoring</button>
+                        <p id="status-text" style="text-align:center; margin-top:1rem; color:var(--text-muted); min-height:1.5rem;"></p>
+                    </div>
+
+                    <div class="card">
+                        <div id="report-content">
+                            <div class="card-title-container">
+                                <h2>Your Results</h2>
+                                <button id="importance-btn">Importance</button>
+                            </div>
+                            <div style="display:flex; flex-direction:column; gap:1rem; flex-grow: 1; justify-content: center;">
+                                <div id="results-placeholder">
+                                    <p>Measurements will appear here after analysis.</p>
+                                </div>
+                                <div id="processing-loader">
+                                    <div class="loader"></div>
+                                    <p style="color:#cbd5e1;">Analyzing signal...</p>
+                                </div>
+                                <div id="results-container" style="display:flex; flex-direction:column; gap:0.85rem;"></div>
+                            </div>
+                        </div>
+                        <button id="download-report-btn" style="display: none;"><i class="fas fa-file-download"></i> Download Report</button>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <footer>
+            <div class="container">
+                <p>&copy; 2024 VitalLens. All Rights Reserved. | <a href="#privacy">Privacy Policy</a></p>
+            </div>
+        </footer>
+    </div>
+
+    <div id="info-modal-overlay" class="modal-overlay">
+        <div class="modal-content">
+            <span id="close-modal-btn" class="close-btn">&times;</span>
+            <h3>🩸 Blood Pressure (BP)</h3>
+            <p>Blood pressure is the force of circulating blood on the walls of arteries. It is measured in mmHg and has two key values:</p>
+            <ul>
+                <li><b>Systolic Pressure (upper value):</b> The pressure when the heart contracts and pumps blood into the arteries. It reflects how strongly the heart is working.</li>
+                <li><b>Diastolic Pressure (lower value):</b> The pressure when the heart relaxes between beats. It shows the baseline resistance in the arteries.</li>
+            </ul>
+            <p>👉 <b>Why Important?</b><br>
+                Normal BP is around 120/80 mmHg. High BP (Hypertension) can damage arteries, increasing risk of heart attack, stroke, and kidney disease. Low BP (Hypotension) can cause dizziness, fainting, and inadequate blood supply to organs.</p>
+            <hr>
+            <h3>❤️ Heart Rate (HR)</h3>
+            <p>Heart rate is the number of times the heart beats per minute (bpm). It reflects how hard the heart is working to pump blood through the body.</p>
+            <ul>
+                <li><b>Normal Resting HR:</b> 60–100 bpm for adults.</li>
+                <li><b>Athletes:</b> Often have a lower HR (&lt;60 bpm) because of stronger heart function.</li>
+            </ul>
+            <p>👉 <b>Why Important?</b><br>
+                Heart rate is a direct indicator of cardiovascular health. Continuous abnormal HR may signal underlying issues like arrhythmia, thyroid imbalance, or heart disease.</p>
+            <hr>
+            <h3>😟 Stress Level</h3>
+            <p>Stress is the body’s physical and mental response to demands or challenges. It triggers the release of hormones like adrenaline and cortisol, which affect heart and blood pressure.</p>
+            <p>Physiological Signs of Stress include increased heart rate, elevated blood pressure, and reduced Heart Rate Variability (HRV).</p>
+            <ul>
+                <li><b>Short-Term Stress:</b> Can improve alertness and energy (fight-or-flight response).</li>
+                <li><b>Chronic Stress:</b> Over time, it contributes to hypertension, heart disease, diabetes, obesity, and mental health issues.</li>
+            </ul>
+            <p>👉 <b>Why Important?</b><br>
+                Monitoring stress helps prevent long-term health risks and improves overall well-being. Techniques like relaxation, exercise, meditation, and sleep help manage stress effectively.</p>
+        </div>
+    </div>
+
+    <script src="script.js" defer></script>
+
+    <script>
+        document.addEventListener('DOMContentLoaded', (event) => {
+            // --- PDF Generation Logic ---
+            const downloadButton = document.getElementById('download-report-btn');
+            downloadButton.addEventListener('click', () => {
+                const reportElement = document.getElementById('report-content');
+                reportElement.classList.add('pdf-export-mode');
+                const today = new Date();
+                const dateString = today.getFullYear() + '-' + String(today.getMonth() + 1).padStart(2, '0') + '-' + String(today.getDate()).padStart(2, '0');
+                const options = {
+                    margin: 15,
+                    filename: `VitalLens_Report_${dateString}.pdf`,
+                    image: {
+                        type: 'jpeg',
+                        quality: 0.98
+                    },
+                    html2canvas: {
+                        scale: 2,
+                        useCORS: true,
+                        backgroundColor: '#ffffff'
+                    },
+                    jsPDF: {
+                        unit: 'mm',
+                        format: 'a4',
+                        orientation: 'portrait'
+                    }
+                };
+                html2pdf().from(reportElement).set(options).save();
+                setTimeout(() => {
+                    reportElement.classList.remove('pdf-export-mode');
+                }, 500);
+            });
+
+            // --- Modal Functionality ---
+            const importanceBtn = document.getElementById('importance-btn');
+            const modalOverlay = document.getElementById('info-modal-overlay');
+            const closeModalBtn = document.getElementById('close-modal-btn');
+
+            // Function to show the modal
+            importanceBtn.addEventListener('click', () => {
+                modalOverlay.style.display = 'flex';
+            });
+
+            // Function to hide the modal
+            const closeModal = () => {
+                modalOverlay.style.display = 'none';
+            }
+
+            closeModalBtn.addEventListener('click', closeModal);
+
+            // Also close modal if user clicks on the overlay background
+            modalOverlay.addEventListener('click', (e) => {
+                if (e.target === modalOverlay) {
+                    closeModal();
+                }
+            });
+        });
+    </script>
+</body>
+</html>
