@@ -17,7 +17,6 @@ def init_db():
     """Initializes the database and creates the users table with a fullname column."""
     conn = sqlite3.connect(DATABASE)
     cursor = conn.cursor()
-    # Add a 'fullname' column to the users table
     cursor.execute('''
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -56,14 +55,11 @@ train_model_if_needed()
 model = joblib.load(MODEL_PATH)
 print("Flask app is ready to accept requests.")
 
-# --- Authentication Routes (UPDATED) ---
-
-# --- THIS IS THE MISSING ROUTE ---
+# --- Main Routes ---
 @app.route('/')
 def index():
     """Renders the main landing page."""
     return render_template('index.html')
-# ------------------------------------
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
@@ -74,14 +70,11 @@ def login():
         
         conn = sqlite3.connect(DATABASE)
         cursor = conn.cursor()
-        
-        # Fetch the password AND the fullname for the session
         cursor.execute("SELECT password, fullname FROM users WHERE username = ?", (username,))
         user_record = cursor.fetchone()
         conn.close()
 
         if user_record and check_password_hash(user_record[0], password):
-            # Store both username and fullname in the session
             session['user'] = username
             session['fullname'] = user_record[1]
             return jsonify({'success': True})
@@ -95,14 +88,13 @@ def signup():
         data = request.json
         username = data['username']
         password = data['password']
-        fullname = data['fullname'] # Get fullname from the request
+        fullname = data['fullname']
         
         hashed_password = generate_password_hash(password)
         
         try:
             conn = sqlite3.connect(DATABASE)
             cursor = conn.cursor()
-            # Insert the new user with their full name
             cursor.execute(
                 "INSERT INTO users (username, password, fullname) VALUES (?, ?, ?)",
                 (username, hashed_password, fullname)
@@ -120,16 +112,14 @@ def home():
     if 'user' not in session:
         return redirect(url_for('login'))
     
-    # Use the fullname stored in the session for the welcome message
     display_name = session.get('fullname', 'User')
     return render_template('home.html', username=display_name)
 
-# --- Other Routes (No changes here) ---
 @app.route('/logout')
 def logout():
     session.pop('user', None)
-    session.pop('fullname', None) # Also clear fullname from session
-    return redirect(url_for('index')) # This will now work correctly
+    session.pop('fullname', None)
+    return redirect(url_for('index'))
 
 @app.route('/predict', methods=['POST'])
 def predict():
@@ -142,6 +132,7 @@ def predict():
     file.save(temp_video_path)
 
     try:
+        # This function is now optimized in ml_processor.py to be fast
         filtered_signal = process_video_for_ippg(temp_video_path)
         if filtered_signal is None:
             return jsonify({'error': 'Could not detect a stable signal from the video.'}), 400
@@ -155,6 +146,7 @@ def predict():
         session['last_measurement'] = result
         return jsonify(result)
     finally:
+        # Ensure the temporary file is always deleted
         if os.path.exists(temp_video_path):
             os.remove(temp_video_path)
 
@@ -163,7 +155,6 @@ def download_report():
     if 'user' not in session: return redirect(url_for('login'))
     if 'last_measurement' not in session: return "No measurement found.", 404
 
-    # Use fullname for the report
     username = session.get('fullname', session['user'])
     vitals = session['last_measurement']
     report_path = create_report(username, vitals)
@@ -171,3 +162,4 @@ def download_report():
 
 if __name__ == '__main__':
     app.run(debug=True)
+
