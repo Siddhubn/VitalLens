@@ -1,140 +1,113 @@
 import cv2
 import numpy as np
-import os
-from scipy.signal import butter, filtfilt, find_peaks
-import pandas as pd
+from scipy.signal import butter, filtfilt
 
 # --- Configuration ---
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-FACE_CASCADE_PATH = os.path.join(SCRIPT_DIR, 'haarcascade_frontalface_default.xml')
-VIDEO_FOLDER = os.path.join(SCRIPT_DIR, 'videos')
-LABELS_FILE = os.path.join(SCRIPT_DIR, 'labels.csv')  # labels.csv in backend folder
+# This line loads the pre-built face detector model from OpenCV's library.
+# It should work automatically if opencv-python is installed correctly.
+try:
+    face_cascade = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+except Exception:
+    print("ERROR: Could not load the Haar Cascade face detector.")
+    print("Please ensure that 'opencv-python' is installed correctly.")
+    exit()
 
-# --- Signal Processing Functions ---
-
-def bandpass_filter(data, lowcut, highcut, fs, order=3):
+def get_filtered_signal(signal, low_cutoff=0.75, high_cutoff=4.0, fs=30):
     """
-    Applies a bandpass filter to the signal.
+    Applies a Butterworth bandpass filter to the raw signal.
+    This is a crucial step to remove noise (like lighting changes or movement)
+    and isolate the frequency range where human heartbeats occur (approx. 45-240 bpm).
     """
-    nyquist = 0.5 * fs
-    low = lowcut / nyquist
-    high = highcut / nyquist
-    b, a = butter(order, [low, high], btype='band')
-    padlen = 3 * max(len(a), len(b))
-    if len(data) <= padlen:
-        print(f"Warning: Signal too short for filtering (length={len(data)}, required>{padlen}). Skipping.")
+    if signal is None or len(signal) < 20: # A minimum length is required for filtering
         return None
-    y = filtfilt(b, a, data)
-    return y
+        
+    nyquist = 0.5 * fs
+    low = low_cutoff / nyquist
+    high = high_cutoff / nyquist
+    
+    # Use a 1st order Butterworth filter
+    b, a = butter(1, [low, high], btype='band')
+    
+    try:
+        filtered_signal = filtfilt(b, a, signal)
+        return filtered_signal
+    except ValueError:
+        # This can happen if the signal is too short or contains NaNs
+        return None
 
-def extract_raw_signal(video_path):
+def extract_features(signal):
     """
-    Extracts the raw iPPG signal and frame rate from a video file.
+    Calculates key statistical features from the clean iPPG signal.
+    These features numerically describe the shape of the pulse wave and
+    will be the input for the machine learning model.
     """
-    face_cascade = cv2.CascadeClassifier(FACE_CASCADE_PATH)
-    if face_cascade.empty():
-        print(f"Error: Could not load face cascade classifier from path: {FACE_CASCADE_PATH}")
-        return None, None
+    if signal is None:
+        return None
+    return [
+        np.mean(signal),
+        np.std(signal),
+        np.min(signal),
+        np.max(signal),
+        np.ptp(signal) # Peak-to-peak (range) of the signal
+    ]
 
+def process_video_for_ippg(video_path):
+    """
+    This is the main pipeline function for processing a video file. It performs:
+    1. Video reading, frame by frame.
+    2. Face detection in each frame.
+    3. Defining a Region of Interest (ROI) on the forehead.
+    4. Averaging the green channel pixel values in the ROI to get the raw signal.
+    5. Filtering the raw signal to get the final, clean iPPG waveform.
+    """
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
-        print(f"Error: Could not open video file: {video_path}")
-        return None, None
-
-    fps = cap.get(cv2.CAP_PROP_FPS)
-    if fps <= 0:
-        fps = 30  # default if invalid FPS
-        print(f"Warning: Invalid FPS, defaulting to {fps}")
+        print(f"Error: Could not open video file at {video_path}")
+        return None
 
     raw_signal = []
+    frame_rate = cap.get(cv2.CAP_PROP_FPS)
 
     while True:
         ret, frame = cap.read()
         if not ret:
             break
 
+        # Convert to grayscale for the face detector
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        faces = face_cascade.detectMultiScale(gray, 1.1, 4)
+        
+        # Detect faces
+        faces = face_cascade.detectMultiScale(gray, 1.1, 5)
 
         if len(faces) > 0:
+            # Assume the largest detected face is the subject
+            faces = sorted(faces, key=lambda x: x[2] * x[3], reverse=True)
             x, y, w, h = faces[0]
+
+            # Define the Region of Interest (ROI) on the forehead
+            # This area is less prone to noise from facial expressions.
             forehead_x = x + int(0.2 * w)
             forehead_y = y + int(0.1 * h)
             forehead_w = int(0.6 * w)
-            forehead_h = int(0.2 * h)
-            forehead_roi = frame[forehead_y:forehead_y + forehead_h,
-                                 forehead_x:forehead_x + forehead_w]
+            forehead_h = int(0.15 * h)
+            
+            roi = frame[forehead_y : forehead_y + forehead_h, forehead_x : forehead_x + forehead_w]
 
-            if forehead_roi.size > 0:
-                avg_green = np.mean(forehead_roi[:, :, 1])
-                raw_signal.append(avg_green)
+            if roi.size > 0:
+                # The iPPG signal is strongest in the green channel
+                green_channel_mean = np.mean(roi[:, :, 1])
+                raw_signal.append(green_channel_mean)
+            else:
+                # Append a neutral value if ROI is empty for some reason
+                raw_signal.append(0)
+        else:
+            # If no face is detected in a frame, we append 0.
+            # The filtering process helps mitigate the impact of these frames.
+            raw_signal.append(0)
 
     cap.release()
-    return raw_signal, fps
 
-def process_all_videos():
-    """
-    Processes all videos, extracts features, and combines them with labels.
-    """
-    try:
-        labels_df = pd.read_csv(LABELS_FILE)
-    except FileNotFoundError:
-        print(f"Error: '{LABELS_FILE}' not found.")
-        return None
-
-    all_features = []
-
-    for index, row in labels_df.iterrows():
-        video_filename = row['filename'] + '.mp4'
-        video_path = os.path.join(VIDEO_FOLDER, video_filename)
-
-        if not os.path.exists(video_path):
-            print(f"Warning: Video file not found for {video_filename}. Skipping.")
-            continue
-
-        print(f"Processing: {video_filename}...")
-
-        raw_signal, fps = extract_raw_signal(video_path)
-        if not raw_signal or not fps:
-            print(f"Could not extract signal from {video_filename}. Skipping.")
-            continue
-
-        filtered_signal = bandpass_filter(raw_signal, 0.75, 4.0, fps)
-        if filtered_signal is None:
-            continue
-
-        # Optional: smooth the signal
-        filtered_signal = np.convolve(filtered_signal, np.ones(3)/3, mode='same')
-
-        # Find peaks with minimum distance ~0.5 sec to avoid false peaks
-        min_distance = int(0.5 * fps)
-        peaks, _ = find_peaks(filtered_signal, distance=min_distance)
-        if len(peaks) < 2:
-            print(f"Not enough peaks in {video_filename}. Skipping.")
-            continue
-
-        peak_intervals = np.diff(peaks) / fps
-        avg_interval = np.mean(peak_intervals)
-        heart_rate = 60.0 / avg_interval  # BPM
-
-        features = {
-            'filename': row['filename'],
-            'calculated_hr': heart_rate,
-        }
-
-        all_features.append({**row.to_dict(), **features})
-
-    if not all_features:
-        print("No videos were processed successfully.")
-        return None
-
-    return pd.DataFrame(all_features)
-
-# --- Main Execution ---
-if __name__ == '__main__':
-    processed_data = process_all_videos()
-    if processed_data is not None:
-        print("\n--- Processing Complete ---")
-        print(processed_data.head())
-        processed_data.to_csv('processed_dataset.csv', index=False)
-        print("\nProcessed data saved to 'processed_dataset.csv'")
+    # Filter the raw signal to get a clean iPPG waveform
+    filtered_signal = get_filtered_signal(np.array(raw_signal), fs=frame_rate)
+    
+    return filtered_signal

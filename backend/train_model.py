@@ -1,93 +1,90 @@
 import pandas as pd
+import numpy as np
 from sklearn.model_selection import train_test_split
-from sklearn.ensemble import RandomForestRegressor, RandomForestClassifier
-from sklearn.metrics import mean_absolute_error, accuracy_score
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import mean_absolute_error
 import joblib
 import os
+from ml_processor import process_video_for_ippg, extract_features
 
 # --- Configuration ---
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-PROCESSED_DATA_FILE = os.path.join(SCRIPT_DIR, 'processed_dataset.csv')
-MODELS_DIR = os.path.join(SCRIPT_DIR, 'models')
+# This script assumes it's being run from the 'backend' directory.
+TRAINING_DATA_PATH = '../training_data/'
+VIDEO_FOLDER = os.path.join(TRAINING_DATA_PATH, 'videos')
+LABELS_FILE = os.path.join(TRAINING_DATA_PATH, 'labels.csv')
+MODEL_SAVE_PATH = 'trained_model/vital_signs_model.pkl'
 
-# --- Main Training Function ---
-def train_models():
-    """
-    Loads the processed data, trains models for BP, HR, and Stress,
-    and saves them to disk.
-    """
-    # 1. Load the processed dataset
-    try:
-        df = pd.read_csv(PROCESSED_DATA_FILE)
-    except FileNotFoundError:
-        print(f"Error: '{PROCESSED_DATA_FILE}' not found.")
-        print("Please run ml_processor.py first to generate the processed dataset.")
-        return
+# --- 1. Load Labels ---
+print("Loading labels...")
+try:
+    labels_df = pd.read_csv(LABELS_FILE)
+except FileNotFoundError:
+    print(f"ERROR: The labels file was not found at {LABELS_FILE}")
+    print("Please make sure your 'labels.csv' file is in the 'training_data' folder.")
+    exit()
 
-    print("--- Dataset Loaded ---")
-    print(df.head())
+print(f"Found labels for {len(labels_df)} videos.")
 
-    # 2. Define Features (X) and Targets (y)
-    # For this initial model, we will use the heart rate we calculated from the signal
-    # as the primary feature. In a real project, you would add many more features.
-    features = ['calculated_hr']
-    X = df[features]
+# --- 2. Process Videos and Extract Features ---
+print("\nProcessing videos and extracting iPPG features...")
+print("This may take some time depending on the number and length of your videos.")
+all_features = []
+all_labels = []
 
-    # Define the different targets we want to predict
-    y_bp = df[['blood_pressure_systolic', 'blood_pressure_diastolic']]
-    y_hr = df['heart_rate']
-    y_stress = df['Stress level'] # The column name from your CSV
+for index, row in labels_df.iterrows():
+    # Assumes the 'filename' column does NOT have an extension.
+    filename = row['filename']
+    video_path = os.path.join(VIDEO_FOLDER, f"{filename}.mp4") # Assumes all videos are .mp4
 
-    # 3. Split the data into training and testing sets
-    X_train, X_test, y_bp_train, y_bp_test, y_hr_train, y_hr_test, y_stress_train, y_stress_test = train_test_split(
-        X, y_bp, y_hr, y_stress, test_size=0.2, random_state=42
-    )
+    if not os.path.exists(video_path):
+        print(f"  - WARNING: Video file not found for '{filename}', skipping.")
+        continue
 
-    print(f"\nTraining with {len(X_train)} samples, testing with {len(X_test)} samples.")
-
-    # --- Train Blood Pressure Model ---
-    print("\n--- Training Blood Pressure Model ---")
-    # A RandomForestRegressor can predict multiple targets at once
-    bp_model = RandomForestRegressor(n_estimators=100, random_state=42)
-    bp_model.fit(X_train, y_bp_train)
+    print(f"  - Processing: {filename}.mp4")
+    # Process the video to get the clean iPPG signal
+    ippg_signal = process_video_for_ippg(video_path)
     
-    # Evaluate the model
-    bp_preds = bp_model.predict(X_test)
-    bp_mae = mean_absolute_error(y_bp_test, bp_preds)
-    print(f"Blood Pressure Model MAE: {bp_mae:.2f}")
+    if ippg_signal is not None and len(ippg_signal) > 0:
+        # Extract statistical features from the signal
+        features = extract_features(ippg_signal)
+        all_features.append(features)
+        
+        # We will predict systolic, diastolic, and heart rate together
+        all_labels.append([row['systolic_bp'], row['diastolic_bp'], row['heart_rate']])
+    else:
+        print(f"  - WARNING: Could not extract a valid signal for '{filename}', skipping.")
 
-    # --- Train Heart Rate Model ---
-    print("\n--- Training Heart Rate Model ---")
-    hr_model = RandomForestRegressor(n_estimators=100, random_state=42)
-    hr_model.fit(X_train, y_hr_train)
-    
-    # Evaluate the model
-    hr_preds = hr_model.predict(X_test)
-    hr_mae = mean_absolute_error(y_hr_test, hr_preds)
-    print(f"Heart Rate Model MAE: {hr_mae:.2f} bpm")
+if not all_features:
+    print("\nERROR: No features were extracted. Could not train the model.")
+    print("Please check your video files and ensure they contain detectable faces.")
+    exit()
 
-    # --- Train Stress Level Model ---
-    print("\n--- Training Stress Level Model ---")
-    # We use a Classifier for stress because it's a category (Low, Moderate, High)
-    stress_model = RandomForestClassifier(n_estimators=100, random_state=42)
-    stress_model.fit(X_train, y_stress_train)
+X = np.array(all_features)
+y = np.array(all_labels)
 
-    # Evaluate the model
-    stress_preds = stress_model.predict(X_test)
-    stress_accuracy = accuracy_score(y_stress_test, stress_preds)
-    print(f"Stress Model Accuracy: {stress_accuracy * 100:.2f}%")
+# --- 3. Train the Machine Learning Model ---
+print("\nTraining the model...")
+# Split data into training and a small test set for validation
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
 
-    # 4. Save the trained models
-    if not os.path.exists(MODELS_DIR):
-        os.makedirs(MODELS_DIR)
+# Using RandomForestRegressor as it's robust and good for this type of task
+# It can predict multiple values at once (multi-output)
+model = RandomForestRegressor(n_estimators=100, random_state=42, n_jobs=-1) # n_jobs=-1 uses all available CPU cores
+model.fit(X_train, y_train)
 
-    joblib.dump(bp_model, os.path.join(MODELS_DIR, 'bp_model.pkl'))
-    joblib.dump(hr_model, os.path.join(MODELS_DIR, 'hr_model.pkl'))
-    joblib.dump(stress_model, os.path.join(MODELS_DIR, 'stress_model.pkl'))
-    
-    print(f"\nModels saved successfully to the '{MODELS_DIR}' directory.")
+# --- 4. Evaluate the Model ---
+print("\nEvaluating model performance on the test set...")
+predictions = model.predict(X_test)
+mae = mean_absolute_error(y_test, predictions, multioutput='raw_values')
+print(f"  - Mean Absolute Error for Systolic BP: {mae[0]:.2f}")
+print(f"  - Mean Absolute Error for Diastolic BP: {mae[1]:.2f}")
+print(f"  - Mean Absolute Error for Heart Rate: {mae[2]:.2f} bpm")
 
+# --- 5. Save the Trained Model ---
+print(f"\nSaving trained model to: {MODEL_SAVE_PATH}")
+os.makedirs(os.path.dirname(MODEL_SAVE_PATH), exist_ok=True)
+joblib.dump(model, MODEL_SAVE_PATH)
 
-# --- Main Execution ---
-if __name__ == '__main__':
-    train_models()
+print("\n-----------------------------------------")
+print("✅ Training complete! Your model is ready.")
+print("-----------------------------------------")
